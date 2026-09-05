@@ -4,9 +4,9 @@ export default async function handler(req, res) {
     return;
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    res.status(500).json({ error: 'ANTHROPIC_API_KEY is not set on the server.' });
+    res.status(500).json({ error: 'GEMINI_API_KEY is not set on the server.' });
     return;
   }
 
@@ -16,21 +16,26 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Convert Claude-style {role, content} messages into Gemini's format
+  const contents = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }]
+  }));
+
   try {
-    const upstream = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        system: 'You are Espidrm, a sharp, direct AI assistant. Answer clearly and concisely with real substance, no filler, no unnecessary preamble.',
-        messages
-      })
-    });
+    const upstream = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: 'You are Espidrm, a sharp, direct AI assistant. Answer clearly and concisely with real substance, no filler, no unnecessary preamble.' }]
+          },
+          contents
+        })
+      }
+    );
 
     const data = await upstream.json();
 
@@ -39,13 +44,8 @@ export default async function handler(req, res) {
       return;
     }
 
-    const text = (data.content || [])
-      .filter(block => block.type === 'text')
-      .map(block => block.text)
-      .join('\n')
-      .trim();
-
-    res.status(200).json({ reply: text || '...' });
+    const reply = data?.candidates?.[0]?.content?.parts?.map(p => p.text).join('\n').trim() || '...';
+    res.status(200).json({ reply });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
